@@ -1,12 +1,13 @@
 #!groovy
 
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
 stage 'Build'
 node {
     step([$class: 'GitHubSetCommitStatusBuilder'])
 
     deleteDir()
-    checkout scm
-    stash "project_files"
 }
 
 stage 'Acceptance Tests'
@@ -15,6 +16,12 @@ userInput = input(message: 'Launch acceptance tests?', parameters: [
         $class: 'ChoiceParameterDefinition',
         name: 'pim_version',
         choices: 'pim-enterprise-dev\npim-community-dev'
+    ],
+    [
+        $class: 'TextParameterDefinition',
+        name: 'ee_branch',
+        defaultValue: '1.4',
+        description: 'Enterprise Edition branch used for the build (useless if "pim_version" is set on "pim-community-dev")'
     ],
     [
         $class: 'ChoiceParameterDefinition',
@@ -54,12 +61,17 @@ userInput = input(message: 'Launch acceptance tests?', parameters: [
 ])
 
 node {
-    unstash "project_files"
+    eeBranch = userInput['ee_branch'] ? userInput['ee_branch'] : '1.4'
+    git url: 'https://github.com/akeneo/pim-enterprise-dev.git', branch: eeBranch
 
     phpBinary = 'php'
     if ('5.6' != userInput['php_version']) {
         phpBinary += userInput['php_version']
     }
+
+    composerFile = readFile('composer.json')
+    composerFile = updateComposerFile(composerFile, userInput['pim_version'], userInput['php_version'], env.BRANCH_NAME)
+    writeFile file: 'composer.json', text: composerFile
 
     sh "${phpBinary} /usr/local/bin/composer update -o -n --no-progress --prefer-dist --ignore-platform-reqs"
 
@@ -77,7 +89,50 @@ node {
 
 stage 'Results'
 node {
+    // The workers did not handle build interruption...
+
     step([$class: 'ArtifactArchiver', allowEmptyArchive: true, artifacts: 'app/build/screenshots/*.png,app/build/logs/consumer/*.log', defaultExcludes: false, excludes: null])
-    step([$class: 'JUnitResultArchiver', testResults: 'app/build/phpunit.xml, app/build/phpspec.xml, app/build/logs/behat/*.xml'])
+    step([$class: 'JUnitResultArchiver', testResults: 'app/build/logs/behat/*.xml'])
     step([$class: 'GitHubCommitStatusSetter', resultOnFailure: 'FAILURE', statusMessage: [content: 'Build finished']])
+}
+
+/**
+ * Updates the composer.json file according to pull request and user settings.
+ *
+ * @param String workspace
+ * @param String edition
+ * @param String phpVersion
+ * @param String ceBranch
+ *
+ * @return String
+ */
+def static updateComposerFile(composerFile, edition, phpVersion, ceBranch)
+{
+    JsonSlurper jsonSlurper = new JsonSlurper();
+    def parsedComposerFile = jsonSlurper.parseText(composerFile);
+
+    if ('pim-enterprise-dev' == edition) {
+        parsedComposerFile['require']['akeneo/pim-community-dev'] = 'dev-' + ceBranch;
+
+        /**
+         * We need to find a way to get the branch owner automatically. Sadly, env.BRANCH_OWNER does not exists...
+         *
+         * if ('akeneo' != env.BRANCH_OWNER) {
+         *     if (!parsedComposerFile['repositories']) {
+         *         parsedComposerFile['repositories'] = [];
+         *     }
+         *     parsedComposerFile['repositories'][] = [
+         *         'type' => 'vcs',
+         *         'url' => 'https://github.com/' + env.BRANCH_OWNER + '/pim-community-dev.git',
+         *         'branch' => 'master',
+         *     ];
+         * }
+         */
+    }
+
+    if ('7.0' == phpVersion) {
+        parsedComposerFile['require-dev']['alcaeus/mongo-php-adapter'] = '1.0.*';
+    }
+
+    return JsonOutput.prettyPrint(JsonOutput.toJson(parsedComposerFile));
 }
