@@ -66,6 +66,7 @@ class GroupSaverSpec extends ObjectBehavior
         );
 
         $group->getType()->willReturn($type);
+        $group->getId()->willReturn(null);
         $group->getCode()->willReturn('my_code');
         $objectManager->persist($group)->shouldBeCalled();
         $objectManager->flush()->shouldBeCalled();
@@ -94,6 +95,7 @@ class GroupSaverSpec extends ObjectBehavior
         );
 
         $group->getType()->willReturn($type);
+        $group->getId()->willReturn(null);
         $group->getCode()->willReturn('my_code');
         $objectManager->persist($group)->shouldBeCalled();
         $objectManager->flush()->shouldBeCalled();
@@ -127,6 +129,7 @@ class GroupSaverSpec extends ObjectBehavior
         );
 
         $group->getType()->willReturn($type);
+        $group->getId()->willReturn(null);
         $group->getCode()->willReturn('my_code');
         $objectManager->persist($group)->shouldBeCalled();
         $objectManager->flush()->shouldBeCalled();
@@ -149,6 +152,7 @@ class GroupSaverSpec extends ObjectBehavior
         ProductTemplateInterface $template
     ) {
         $group->getType()->willReturn($type);
+        $group->getId()->willReturn(null);
         $group->getCode()->willReturn('my_code');
         $type->isVariant()->willReturn(true);
         $group->getProductTemplate()->willReturn($template);
@@ -182,6 +186,7 @@ class GroupSaverSpec extends ObjectBehavior
         );
 
         $group->getType()->willReturn($type);
+        $group->getId()->willReturn(null);
         $group->getCode()->willReturn('my_code');
         $objectManager->persist($group)->shouldBeCalled();
         $objectManager->flush()->shouldBeCalled();
@@ -214,5 +219,33 @@ class GroupSaverSpec extends ObjectBehavior
                 )
             )
             ->during('save', [$anythingElse]);
+    }
+
+    function it_refresh_a_group_in_case_of_update(
+        $objectManager,
+        $optionsResolver,
+        $eventDispatcher,
+        GroupInterface $group,
+        GroupType $type
+    ) {
+        $optionsResolver->resolveSaveOptions([])->willReturn(
+            [
+                'flush'                   => true,
+                'copy_values_to_products' => false,
+                'add_products'            => [],
+                'remove_products'         => [],
+            ]
+        );
+
+        $group->getType()->willReturn($type);
+        $group->getId()->willReturn(12);
+        $group->getCode()->willReturn('my_code');
+        $objectManager->persist($group)->shouldBeCalled();
+        $objectManager->flush()->shouldBeCalled();
+        $objectManager->refresh($group)->shouldBeCalled();
+
+        $eventDispatcher->dispatch(StorageEvents::PRE_SAVE, Argument::cetera())->shouldBeCalled();
+        $eventDispatcher->dispatch(StorageEvents::POST_SAVE, Argument::cetera())->shouldBeCalled();
+        $this->save($group);
     }
 }
